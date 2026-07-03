@@ -28,12 +28,6 @@ npx @loongphy/codex-auth list
 
 > [!IMPORTANT]
 > For **Codex CLI** and **Codex App** users, switch accounts, then restart the client for the new account to take effect.
->
-> If you want seamless automatic account switching without restarting, use the forked [`codext`](https://github.com/Loongphy/codext), an enhanced Codex CLI.
->
-> Install it with `npm i -g @loongphy/codext` and run `codext`.
->
-> Codex App users can use `codex-auth app`, but it is not stable. See [Details](#codex-app).
 
 Install the Codex CLI even if you mainly use the VS Code extension or the App, because it makes adding accounts easier:
 
@@ -103,26 +97,7 @@ codex-auth import /path/to/auth.json --alias personal
 codex-auth list --skip-api
 ```
 
-## Codex App
-
-> [!IMPORTANT]
-> The `app` command is **experimental** and may never become a stable feature.
->
-> It is designed to enable seamless account switching without restarting the Codex App. By leveraging the `CODEX_CLI_PATH` environment variable, it dynamically injects our managed codext CLI to handle authentication on the fly.
->
-> The `app` command is constrained by ongoing changes in the official Codex App and [Codex CLI](https://github.com/openai/codex). It may not always take effect and may also break your app.
-
-| Command | Description |
-|---------|-------------|
-| [`codex-auth app [--id <id>] [--codex-cli-path <path>]`](./docs/commands/app.md) | Experimental: launch Codex App with detected defaults, CODEX_HOME, CODEX_CLI_PATH, and platform overrides |
-
-Support seamless account switching including:
-
-- New Chat
-- Restoring or resuming an existing conversation
-- Continuing a previously completed, interrupted, or manually stopped conversation
-
-### Uninstall
+## Uninstall
 
 Remove the npm package:
 
