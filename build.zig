@@ -22,16 +22,50 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
-    const fake_node_module = b.createModule(.{
-        .root_source_file = b.path("tests/fake_node.zig"),
+    const fake_curl_module = b.createModule(.{
+        .root_source_file = b.path("tests/fake_curl.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const fake_node_exe = b.addExecutable(.{
-        .name = "fake-node",
-        .root_module = fake_node_module,
+    const fake_curl_exe = b.addExecutable(.{
+        .name = "curl",
+        .root_module = fake_curl_module,
     });
-    b.installArtifact(fake_node_exe);
+    const install_fake_curl = b.addInstallArtifact(fake_curl_exe, .{});
+    const fake_curl_fail_module = b.createModule(.{
+        .root_source_file = b.path("tests/fake_curl_fail.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const fake_curl_fail_exe = b.addExecutable(.{
+        .name = "curl-fail",
+        .root_module = fake_curl_fail_module,
+    });
+    const install_fake_curl_fail = b.addInstallArtifact(fake_curl_fail_exe, .{});
+    const fake_codex_module = b.createModule(.{
+        .root_source_file = b.path("tests/fake_codex.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .imports = &.{
+            .{ .name = "app_runtime", .module = b.createModule(.{
+                .root_source_file = b.path("src/core/runtime.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            }) },
+        },
+    });
+    const fake_codex_exe = b.addExecutable(.{
+        .name = "fake-codex",
+        .root_module = fake_codex_module,
+    });
+    const install_fake_codex = b.addInstallArtifact(fake_codex_exe, .{});
+    const test_helpers_step = b.step("test-helpers", "Install test helper binaries");
+    test_helpers_step.dependOn(b.getInstallStep());
+    test_helpers_step.dependOn(&install_fake_curl.step);
+    test_helpers_step.dependOn(&install_fake_curl_fail.step);
+    test_helpers_step.dependOn(&install_fake_codex.step);
 
     const run_cmd = b.addRunArtifact(exe);
     if (b.args) |args| {

@@ -68,6 +68,7 @@ pub const RateLimitSnapshot = struct {
     primary: ?RateLimitWindow,
     secondary: ?RateLimitWindow,
     credits: ?CreditsSnapshot,
+    reset_credits: ?i64 = null,
     plan_type: ?PlanType,
 };
 
@@ -135,6 +136,7 @@ pub fn planLabel(plan: PlanType) []const u8 {
 pub const Registry = struct {
     schema_version: u32,
     active_account_key: ?[]u8,
+    previous_active_account_key: ?[]u8 = null,
     active_account_activated_at_ms: ?i64,
     api: ApiConfig,
     live: LiveConfig = defaultLiveConfig(),
@@ -145,6 +147,7 @@ pub const Registry = struct {
             freeAccountRecord(allocator, rec);
         }
         if (self.active_account_key) |k| allocator.free(k);
+        if (self.previous_active_account_key) |k| allocator.free(k);
         self.accounts.deinit(allocator);
     }
 };
@@ -214,6 +217,7 @@ pub fn cloneRateLimitSnapshot(allocator: std.mem.Allocator, snapshot: RateLimitS
         .primary = snapshot.primary,
         .secondary = snapshot.secondary,
         .credits = cloned_credits,
+        .reset_credits = snapshot.reset_credits,
         .plan_type = snapshot.plan_type,
     };
 }
@@ -259,6 +263,7 @@ pub fn rateLimitSnapshotEqual(a: RateLimitSnapshot, b: RateLimitSnapshot) bool {
     return rateLimitWindowEqual(a.primary, b.primary) and
         rateLimitWindowEqual(a.secondary, b.secondary) and
         creditsEqual(a.credits, b.credits) and
+        a.reset_credits == b.reset_credits and
         a.plan_type == b.plan_type;
 }
 
@@ -400,7 +405,8 @@ pub fn hardenSensitiveDir(path: []const u8) !void {
 }
 
 pub fn ensurePrivateDir(path: []const u8) !void {
-    try std.Io.Dir.cwd().createDirPath(app_runtime.io(), path);
+    // Ignore created/existed status; existing dirs are hardened below too.
+    _ = try std.Io.Dir.cwd().createDirPathStatus(app_runtime.io(), path, private_dir_permissions);
     try hardenSensitiveDir(path);
 }
 

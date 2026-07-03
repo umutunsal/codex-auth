@@ -184,6 +184,26 @@ pub fn printSwitchAccountNotFoundError(query: []const u8) !void {
     try out.flush();
 }
 
+pub fn printNoPreviousAccountError() !void {
+    var stderr: io_util.Stderr = undefined;
+    stderr.init();
+    const out = stderr.out();
+    const use_color = stderr.color_enabled;
+    try writeErrorPrefixTo(out, use_color);
+    try out.writeAll(" no previous account to switch to.\n");
+    try out.flush();
+}
+
+pub fn printPreviousAccountUnavailableError() !void {
+    var stderr: io_util.Stderr = undefined;
+    stderr.init();
+    const out = stderr.out();
+    const use_color = stderr.color_enabled;
+    try writeErrorPrefixTo(out, use_color);
+    try out.writeAll(" previous account is no longer available.\n");
+    try out.flush();
+}
+
 pub fn printAliasAccountNotFoundError(query: []const u8) !void {
     var stderr: io_util.Stderr = undefined;
     stderr.init();
@@ -437,6 +457,10 @@ pub fn writeCodexLoginLaunchFailureHintTo(out: *std.Io.Writer, err_name: []const
         try writeHintPrefixTo(out, use_color);
         try out.writeAll(" Ensure the Codex CLI is installed and available in your environment.\n");
         try out.writeAll("      Then run `codex login` manually and retry your command.\n");
+    } else if (std.mem.eql(u8, err_name, "PowerShellNotFound")) {
+        try out.writeAll(" the `codex.ps1` launcher requires PowerShell, but neither `powershell.exe` nor `pwsh.exe` was found in your PATH.\n\n");
+        try writeHintPrefixTo(out, use_color);
+        try out.writeAll(" Install PowerShell, or use a Codex CLI installation that provides `codex.exe`, `codex.cmd`, or `codex.bat`, then retry your command.\n");
     } else {
         try out.writeAll(" failed to launch the `codex login` process.\n\n");
         try writeHintPrefixTo(out, use_color);

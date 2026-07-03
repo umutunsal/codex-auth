@@ -105,7 +105,7 @@ fn buildCliBinary(allocator: std.mem.Allocator, project_root: []const u8) !void 
     try env_map.put("ZIG_LOCAL_CACHE_DIR", local_cache_dir);
     try env_map.put(cli_integration_install_prefix_env, install_prefix);
 
-    const result = try runCapture(allocator, project_root, &env_map, &[_][]const u8{ "zig", "build", "-p", install_prefix });
+    const result = try runCapture(allocator, project_root, &env_map, &[_][]const u8{ "zig", "build", "-p", install_prefix, "test-helpers" });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
@@ -138,6 +138,22 @@ fn fakeCodexCommandPath() []const u8 {
     return if (builtin.os.tag == .windows) "fake-bin/codex.cmd" else "fake-bin/codex";
 }
 
+fn fakeCodexPowerShellPath() []const u8 {
+    return "fake-bin/codex.ps1";
+}
+
+fn fakeCodexBatchPath() []const u8 {
+    return "fake-bin/codex.bat";
+}
+
+fn fakeCodexExePath() []const u8 {
+    return "fake-bin/codex.exe";
+}
+
+fn fakeBareWindowsCodexPath() []const u8 {
+    return "fake-bin/codex";
+}
+
 fn writeFailingFakeCodex(dir: fs.Dir, exit_code: u8) !void {
     var script_buf: [128]u8 = undefined;
     const script = if (builtin.os.tag == .windows)
@@ -158,6 +174,7 @@ fn writeSuccessfulFakeCodex(dir: fs.Dir) !void {
     const script =
         if (builtin.os.tag == .windows)
             "@echo off\r\n" ++
+                ">\"%HOME%\\fake-codex-launcher.txt\" echo cmd\r\n" ++
                 ">\"%HOME%\\fake-codex-argv.txt\" echo %*\r\n" ++
                 ">\"%HOME%\\fake-codex-home.txt\" echo %CODEX_HOME%\r\n" ++
                 "set \"CODEX_HOME_DIR=%CODEX_HOME%\"\r\n" ++
@@ -167,6 +184,7 @@ fn writeSuccessfulFakeCodex(dir: fs.Dir) !void {
                 "exit /b 0\r\n"
         else
             "#!/bin/sh\n" ++
+                "printf '%s\\n' 'posix' > \"$HOME/fake-codex-launcher.txt\"\n" ++
                 "printf '%s\\n' \"$*\" > \"$HOME/fake-codex-argv.txt\"\n" ++
                 "printf '%s\\n' \"$CODEX_HOME\" > \"$HOME/fake-codex-home.txt\"\n" ++
                 "CODEX_HOME_DIR=\"${CODEX_HOME:-$HOME/.codex}\"\n" ++
@@ -183,18 +201,28 @@ fn writeSuccessfulFakeCodex(dir: fs.Dir) !void {
     }
 }
 
-fn fakeNodeCommandPath() []const u8 {
-    return if (builtin.os.tag == .windows) "fake-node-bin/node.cmd" else "fake-node-bin/node";
-}
-
-fn writeFailingFakeNode(dir: fs.Dir) !void {
-    try dir.makePath("fake-node-bin");
-    var script_buf: [160]u8 = undefined;
-    const script = if (builtin.os.tag == .windows)
-        try std.fmt.bufPrint(&script_buf, "@echo off\r\nif \"%~1\"==\"--version\" (\r\n  echo v22.0.0\r\n  exit /b 0\r\n)\r\nexit /b 1\r\n", .{})
-    else
-        try std.fmt.bufPrint(&script_buf, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo v22.0.0\n  exit 0\nfi\nexit 1\n", .{});
-    const sub_path = fakeNodeCommandPath();
+fn writeStrictExistingCodexHomeFakeCodex(dir: fs.Dir) !void {
+    const script =
+        if (builtin.os.tag == .windows)
+            "@echo off\r\n" ++
+                ">\"%HOME%\\fake-codex-launcher.txt\" echo cmd\r\n" ++
+                ">\"%HOME%\\fake-codex-argv.txt\" echo %*\r\n" ++
+                ">\"%HOME%\\fake-codex-home.txt\" echo %CODEX_HOME%\r\n" ++
+                "set \"CODEX_HOME_DIR=%CODEX_HOME%\"\r\n" ++
+                "if \"%CODEX_HOME_DIR%\"==\"\" set \"CODEX_HOME_DIR=%HOME%\\.codex\"\r\n" ++
+                "if not exist \"%CODEX_HOME_DIR%\" exit /b 42\r\n" ++
+                "copy /Y \"%HOME%\\fake-auth.json\" \"%CODEX_HOME_DIR%\\auth.json\" >NUL\r\n" ++
+                "exit /b 0\r\n"
+        else
+            "#!/bin/sh\n" ++
+                "printf '%s\\n' 'posix' > \"$HOME/fake-codex-launcher.txt\"\n" ++
+                "printf '%s\\n' \"$*\" > \"$HOME/fake-codex-argv.txt\"\n" ++
+                "printf '%s\\n' \"$CODEX_HOME\" > \"$HOME/fake-codex-home.txt\"\n" ++
+                "CODEX_HOME_DIR=\"${CODEX_HOME:-$HOME/.codex}\"\n" ++
+                "[ -d \"$CODEX_HOME_DIR\" ] || exit 42\n" ++
+                "cp \"$HOME/fake-auth.json\" \"$CODEX_HOME_DIR/auth.json\"\n" ++
+                "exit 0\n";
+    const sub_path = fakeCodexCommandPath();
     try dir.writeFile(.{ .sub_path = sub_path, .data = script });
 
     if (builtin.os.tag != .windows) {
@@ -204,59 +232,167 @@ fn writeFailingFakeNode(dir: fs.Dir) !void {
     }
 }
 
-fn builtFakeNodePathAlloc(allocator: std.mem.Allocator, project_root: []const u8) ![]u8 {
-    const exe_name = if (builtin.os.tag == .windows) "fake-node.exe" else "fake-node";
+fn writeStrictExistingCodexHomeFakeCodexBatch(dir: fs.Dir) !void {
+    if (builtin.os.tag != .windows) return;
+
+    const script =
+        "@echo off\r\n" ++
+        ">\"%HOME%\\fake-codex-launcher.txt\" echo bat\r\n" ++
+        ">\"%HOME%\\fake-codex-argv.txt\" echo %*\r\n" ++
+        ">\"%HOME%\\fake-codex-home.txt\" echo %CODEX_HOME%\r\n" ++
+        "set \"CODEX_HOME_DIR=%CODEX_HOME%\"\r\n" ++
+        "if \"%CODEX_HOME_DIR%\"==\"\" set \"CODEX_HOME_DIR=%HOME%\\.codex\"\r\n" ++
+        "if not exist \"%CODEX_HOME_DIR%\" exit /b 42\r\n" ++
+        "copy /Y \"%HOME%\\fake-auth.json\" \"%CODEX_HOME_DIR%\\auth.json\" >NUL\r\n" ++
+        "exit /b 0\r\n";
+
+    try dir.writeFile(.{ .sub_path = fakeCodexBatchPath(), .data = script });
+}
+
+fn writeBrokenBareWindowsCodex(dir: fs.Dir) !void {
+    if (builtin.os.tag != .windows) return;
+    try dir.writeFile(.{
+        .sub_path = fakeBareWindowsCodexPath(),
+        .data = "#!/bin/sh\nexit 99\n",
+    });
+}
+
+fn writeSuccessfulFakeCodexPowerShellAt(dir: fs.Dir, sub_path: []const u8) !void {
+    if (builtin.os.tag != .windows) return;
+
+    const script =
+        "$homePath = $env:HOME\r\n" ++
+        "[System.IO.File]::WriteAllText((Join-Path $homePath 'fake-codex-launcher.txt'), \"ps1`n\")\r\n" ++
+        "[System.IO.File]::WriteAllText((Join-Path $homePath 'fake-codex-argv.txt'), (($args -join ' ') + \"`n\"))\r\n" ++
+        "[System.IO.File]::WriteAllText((Join-Path $homePath 'fake-codex-home.txt'), ($env:CODEX_HOME + \"`n\"))\r\n" ++
+        "$codexHomeDir = $env:CODEX_HOME\r\n" ++
+        "if ([string]::IsNullOrEmpty($codexHomeDir)) { $codexHomeDir = Join-Path $homePath '.codex' }\r\n" ++
+        "if (-not (Test-Path -LiteralPath $codexHomeDir)) { New-Item -ItemType Directory -Path $codexHomeDir | Out-Null }\r\n" ++
+        "Copy-Item -Force (Join-Path $homePath 'fake-auth.json') (Join-Path $codexHomeDir 'auth.json')\r\n";
+
+    try dir.writeFile(.{ .sub_path = sub_path, .data = script });
+}
+
+fn writeSuccessfulFakeCodexPowerShell(dir: fs.Dir) !void {
+    try writeSuccessfulFakeCodexPowerShellAt(dir, fakeCodexPowerShellPath());
+}
+
+fn writeSuccessfulFakeCodexExeAt(
+    allocator: std.mem.Allocator,
+    dir: fs.Dir,
+    project_root: []const u8,
+    sub_path: []const u8,
+) !void {
+    if (builtin.os.tag != .windows) return;
+
+    const built_fake_codex = try builtFakeCodexPathAlloc(allocator, project_root);
+    defer allocator.free(built_fake_codex);
+    const fake_codex_data = try fixtures.readFileAlloc(allocator, built_fake_codex);
+    defer allocator.free(fake_codex_data);
+    try dir.writeFile(.{ .sub_path = sub_path, .data = fake_codex_data });
+}
+
+fn writeSuccessfulFakeCodexExe(
+    allocator: std.mem.Allocator,
+    dir: fs.Dir,
+    project_root: []const u8,
+) !void {
+    try writeSuccessfulFakeCodexExeAt(allocator, dir, project_root, fakeCodexExePath());
+}
+
+fn fakeCurlCommandPath() []const u8 {
+    return if (builtin.os.tag == .windows) "fake-curl-bin/curl.exe" else "fake-curl-bin/curl";
+}
+
+fn writeFailingFakeCurl(allocator: std.mem.Allocator, dir: fs.Dir, project_root: []const u8) !void {
+    try dir.makePath("fake-curl-bin");
+    if (builtin.os.tag == .windows) {
+        const built_fake_curl = try builtFakeCurlFailPathAlloc(allocator, project_root);
+        defer allocator.free(built_fake_curl);
+        const fake_curl_data = try fixtures.readFileAlloc(allocator, built_fake_curl);
+        defer allocator.free(fake_curl_data);
+        try dir.writeFile(.{ .sub_path = fakeCurlCommandPath(), .data = fake_curl_data });
+        return;
+    }
+
+    var script_buf: [160]u8 = undefined;
+    const script = try std.fmt.bufPrint(&script_buf, "#!/bin/sh\nexit 1\n", .{});
+    const sub_path = fakeCurlCommandPath();
+    try dir.writeFile(.{ .sub_path = sub_path, .data = script });
+
+    var file = try dir.openFile(sub_path, .{ .mode = .read_write });
+    defer file.close();
+    try file.chmod(0o755);
+}
+
+fn writeApiKeyFlowFakeCurl(allocator: std.mem.Allocator, dir: fs.Dir, project_root: []const u8) !void {
+    try dir.makePath("fake-curl-bin");
+    if (builtin.os.tag == .windows) {
+        const built_fake_curl = try builtFakeCurlPathAlloc(allocator, project_root);
+        defer allocator.free(built_fake_curl);
+        const fake_curl_data = try fixtures.readFileAlloc(allocator, built_fake_curl);
+        defer allocator.free(fake_curl_data);
+        try dir.writeFile(.{ .sub_path = fakeCurlCommandPath(), .data = fake_curl_data });
+        return;
+    }
+
+    const me_body = "{\"id\":\"user_api_e2e\",\"email\":\"apikey-flow@example.com\",\"name\":\"API Flow\"}";
+    const usage_body = "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":12,\"limit_window_seconds\":18000,\"reset_at\":4102444800},\"secondary_window\":{\"used_percent\":34,\"limit_window_seconds\":604800,\"reset_at\":4103049600}}}";
+
+    const script = try std.fmt.allocPrint(
+        allocator,
+        "#!/bin/sh\n" ++
+            "config=$(cat)\n" ++
+            "case \"$config\" in\n" ++
+            "  */v1/me*) printf '%s\\n200' '{s}' ;;\n" ++
+            "  *) printf '%s\\n200' '{s}' ;;\n" ++
+            "esac\n",
+        .{ me_body, usage_body },
+    );
+    defer allocator.free(script);
+
+    const sub_path = fakeCurlCommandPath();
+    try dir.writeFile(.{ .sub_path = sub_path, .data = script });
+
+    var file = try dir.openFile(sub_path, .{ .mode = .read_write });
+    defer file.close();
+    try file.chmod(0o755);
+}
+
+fn builtFakeCurlPathAlloc(allocator: std.mem.Allocator, project_root: []const u8) ![]u8 {
+    const exe_name = if (builtin.os.tag == .windows) "curl.exe" else "curl";
     const install_prefix = getEnvVarOwned(allocator, cli_integration_install_prefix_env) catch |err| switch (err) {
         error.EnvironmentVariableNotFound => null,
         else => return err,
     };
     defer if (install_prefix) |dir| allocator.free(dir);
-    const prefix = install_prefix orelse return fs.path.join(allocator, &[_][]const u8{ project_root, "zig-out" });
+
+    const prefix = install_prefix orelse return fs.path.join(allocator, &[_][]const u8{ project_root, "zig-out", "bin", exe_name });
     return fs.path.join(allocator, &[_][]const u8{ prefix, "bin", exe_name });
 }
 
-fn writeApiKeyFlowFakeNode(allocator: std.mem.Allocator, dir: fs.Dir, project_root: []const u8) !void {
-    _ = project_root; // Only used on Windows via builtFakeNodePathAlloc.
-    try dir.makePath("fake-node-bin");
-    const me_body_b64 = "eyJpZCI6InVzZXJfYXBpX2UyZSIsImVtYWlsIjoiYXBpa2V5LWZsb3dAZXhhbXBsZS5jb20iLCJuYW1lIjoiQVBJIEZsb3cifQ==";
-    const batch_body_b64 = "W3siYm9keSI6ImV5SndiR0Z1WDNSNWNHVWlPaUp3YkhWeklpd2ljbUYwWlY5c2FXMXBkQ0k2ZXlKd2NtbHRZWEo1WDNkcGJtUnZkeUk2ZXlKMWMyVmtYM0JsY21ObGJuUWlPakV5TENKc2FXMXBkRjkzYVc1a2IzZGZjMlZqYjI1a2N5STZNVGd3TURBc0luSmxjMlYwWDJGMElqbzBNVEF5TkRRME9EQXdmU3dpYzJWamIyNWtZWEo1WDNkcGJtUnZkeUk2ZXlKMWMyVmtYM0JsY21ObGJuUWlPak0wTENKc2FXMXBkRjkzYVc1a2IzZGZjMlZqYjI1a2N5STZOakEwT0RBd0xDSnlaWE5sZEY5aGRDSTZOREV3TXpBME9UWXdNSDE5ZlE9PSIsInN0YXR1cyI6MjAwLCJvdXRjb21lIjoib2sifV0=";
+fn builtFakeCurlFailPathAlloc(allocator: std.mem.Allocator, project_root: []const u8) ![]u8 {
+    const exe_name = if (builtin.os.tag == .windows) "curl-fail.exe" else "curl-fail";
+    const install_prefix = getEnvVarOwned(allocator, cli_integration_install_prefix_env) catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    defer if (install_prefix) |dir| allocator.free(dir);
 
-    if (builtin.os.tag == .windows) {
-        // On Windows, the .cmd fake node can't receive multi-line script args.
-        // The compiled fake-node.exe is used instead via CODEX_AUTH_NODE_EXECUTABLE.
-        // Just write the response files; the caller handles the env var.
-        try dir.writeFile(.{ .sub_path = "fake-node-bin/batch_body_b64.txt", .data = batch_body_b64 });
-        try dir.writeFile(.{ .sub_path = "fake-node-bin/me_body_b64.txt", .data = me_body_b64 });
-        return;
-    }
+    const prefix = install_prefix orelse return fs.path.join(allocator, &[_][]const u8{ project_root, "zig-out", "bin", exe_name });
+    return fs.path.join(allocator, &[_][]const u8{ prefix, "bin", exe_name });
+}
 
-    // On Linux/macOS, use a shell script. This avoids the game of copying the compiled
-    // fake-node binary and ensures the test runs fast.
-    const script = try std.fmt.allocPrint(
-        allocator,
-        "#!/bin/sh\n" ++
-            "if [ \"$1\" = \"--version\" ]; then\n" ++
-            "  echo v22.0.0\n" ++
-            "  exit 0\n" ++
-            "fi\n" ++
-            "payload=$(cat)\n" ++
-            "if [ -n \"$payload\" ]; then\n" ++
-            "  printf '%s\\n200\\nok\\n' '{s}'\n" ++
-            "  exit 0\n" ++
-            "fi\n" ++
-            "printf '%s\\n200\\nok\\n' '{s}'\n",
-        .{ batch_body_b64, me_body_b64 },
-    );
-    defer allocator.free(script);
+fn builtFakeCodexPathAlloc(allocator: std.mem.Allocator, project_root: []const u8) ![]u8 {
+    const exe_name = if (builtin.os.tag == .windows) "fake-codex.exe" else "fake-codex";
+    const install_prefix = getEnvVarOwned(allocator, cli_integration_install_prefix_env) catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => null,
+        else => return err,
+    };
+    defer if (install_prefix) |dir| allocator.free(dir);
 
-    const sub_path = fakeNodeCommandPath();
-    try dir.writeFile(.{ .sub_path = sub_path, .data = script });
-
-    if (builtin.os.tag != .windows) {
-        var file = try dir.openFile(sub_path, .{ .mode = .read_write });
-        defer file.close();
-        try file.chmod(0o755);
-    }
+    const prefix = install_prefix orelse return fs.path.join(allocator, &[_][]const u8{ project_root, "zig-out", "bin", exe_name });
+    return fs.path.join(allocator, &[_][]const u8{ prefix, "bin", exe_name });
 }
 
 fn prependPathEntryAlloc(allocator: std.mem.Allocator, entry: []const u8) ![]u8 {
@@ -267,12 +403,11 @@ fn prependPathEntryAlloc(allocator: std.mem.Allocator, entry: []const u8) ![]u8 
     return try std.fmt.allocPrint(allocator, "{s}{c}{s}", .{ entry, fs.path.delimiter, inherited_path });
 }
 
-fn runCliWithIsolatedHomeAndPathAndApiKeyNode(
+fn runCliWithIsolatedHomeAndPathAndApiKeyCurl(
     allocator: std.mem.Allocator,
     project_root: []const u8,
     home_root: []const u8,
     path_override: []const u8,
-    fake_node_response_dir: []const u8,
     args: []const []const u8,
 ) !std.process.RunResult {
     const exe_path = try builtCliPathAlloc(allocator, project_root);
@@ -290,13 +425,6 @@ fn runCliWithIsolatedHomeAndPathAndApiKeyNode(
     _ = env_map.swapRemove("CODEX_HOME");
     try env_map.put("PATH", path_override);
     try env_map.put("CODEX_AUTH_SKIP_SERVICE_RECONCILE", "1");
-    try env_map.put("CODEX_FAKE_NODE_RESPONSE_DIR", fake_node_response_dir);
-
-    // On Windows, point to the compiled fake-node.exe via a relative path so
-    // the access check uses cwd().access() which works in the test runner.
-    if (builtin.os.tag == .windows) {
-        try env_map.put("CODEX_AUTH_NODE_EXECUTABLE", "zig-out\\bin\\fake-node.exe");
-    }
 
     return try runCapture(allocator, project_root, &env_map, argv.items);
 }
@@ -766,6 +894,306 @@ test "Scenario: Given device auth login when running login then it forwards the 
     try std.testing.expectEqualStrings(fake_auth, active_auth);
 }
 
+test "Scenario: Given strict codex login when running login then scratch CODEX_HOME exists before launch" {
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+    try tmp.dir.makePath(".codex");
+    try tmp.dir.makePath("fake-bin");
+
+    const expected_email = "strict-login@example.com";
+    const fake_auth = try fixtures.authJsonWithEmailPlan(gpa, expected_email, "plus");
+    defer gpa.free(fake_auth);
+    try tmp.dir.writeFile(.{ .sub_path = "fake-auth.json", .data = fake_auth });
+    try writeStrictExistingCodexHomeFakeCodex(tmp.dir);
+
+    const fake_bin_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "fake-bin" });
+    defer gpa.free(fake_bin_path);
+    const path_override = try prependPathEntryAlloc(gpa, fake_bin_path);
+    defer gpa.free(path_override);
+
+    const result = try runCliWithIsolatedHomeAndPath(
+        gpa,
+        project_root,
+        home_root,
+        path_override,
+        &[_][]const u8{ "login", "--device-auth" },
+    );
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+
+    try expectSuccess(result);
+
+    const codex_home = try codexHomeAlloc(gpa, home_root);
+    defer gpa.free(codex_home);
+
+    const fake_codex_home_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "fake-codex-home.txt" });
+    defer gpa.free(fake_codex_home_path);
+    const fake_codex_home_data = try fixtures.readFileAlloc(gpa, fake_codex_home_path);
+    defer gpa.free(fake_codex_home_data);
+    const fake_codex_home = std.mem.trim(u8, fake_codex_home_data, " \r\n");
+    try std.testing.expect(!std.mem.eql(u8, fake_codex_home, codex_home));
+    try std.testing.expect(std.mem.indexOf(u8, fake_codex_home, "login-") != null);
+    try std.testing.expectError(error.FileNotFound, fs.cwd().access(fake_codex_home, .{}));
+
+    var loaded = try registry.loadRegistry(gpa, codex_home);
+    defer loaded.deinit(gpa);
+    try std.testing.expectEqual(@as(usize, 1), loaded.accounts.items.len);
+    try std.testing.expect(std.mem.eql(u8, loaded.accounts.items[0].email, expected_email));
+}
+
+test "Scenario: Given npm-style Windows codex wrappers when running login then the bare script is ignored and codex.cmd is launched" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
+
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+    try tmp.dir.makePath(".codex");
+    try tmp.dir.makePath("fake-bin");
+
+    const expected_email = "windows-cmd@example.com";
+    const fake_auth = try fixtures.authJsonWithEmailPlan(gpa, expected_email, "plus");
+    defer gpa.free(fake_auth);
+    try tmp.dir.writeFile(.{ .sub_path = "fake-auth.json", .data = fake_auth });
+    try writeBrokenBareWindowsCodex(tmp.dir);
+    try writeStrictExistingCodexHomeFakeCodex(tmp.dir);
+
+    const fake_bin_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "fake-bin" });
+    defer gpa.free(fake_bin_path);
+    const path_override = try prependPathEntryAlloc(gpa, fake_bin_path);
+    defer gpa.free(path_override);
+
+    const result = try runCliWithIsolatedHomeAndPath(
+        gpa,
+        project_root,
+        home_root,
+        path_override,
+        &[_][]const u8{ "login", "--device-auth" },
+    );
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+
+    try expectSuccess(result);
+
+    const launcher_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "fake-codex-launcher.txt" });
+    defer gpa.free(launcher_path);
+    const launcher_data = try fixtures.readFileAlloc(gpa, launcher_path);
+    defer gpa.free(launcher_data);
+    try std.testing.expectEqualStrings("cmd", std.mem.trim(u8, launcher_data, " \r\n"));
+}
+
+test "Scenario: Given only a Windows batch codex wrapper when running login then codex.bat is launched" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
+
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+    try tmp.dir.makePath(".codex");
+    try tmp.dir.makePath("fake-bin");
+
+    const expected_email = "windows-bat@example.com";
+    const fake_auth = try fixtures.authJsonWithEmailPlan(gpa, expected_email, "plus");
+    defer gpa.free(fake_auth);
+    try tmp.dir.writeFile(.{ .sub_path = "fake-auth.json", .data = fake_auth });
+    try writeBrokenBareWindowsCodex(tmp.dir);
+    try writeStrictExistingCodexHomeFakeCodexBatch(tmp.dir);
+
+    const fake_bin_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "fake-bin" });
+    defer gpa.free(fake_bin_path);
+    const path_override = try prependPathEntryAlloc(gpa, fake_bin_path);
+    defer gpa.free(path_override);
+
+    const result = try runCliWithIsolatedHomeAndPath(
+        gpa,
+        project_root,
+        home_root,
+        path_override,
+        &[_][]const u8{ "login", "--device-auth" },
+    );
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+
+    try expectSuccess(result);
+
+    const launcher_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "fake-codex-launcher.txt" });
+    defer gpa.free(launcher_path);
+    const launcher_data = try fixtures.readFileAlloc(gpa, launcher_path);
+    defer gpa.free(launcher_data);
+    try std.testing.expectEqualStrings("bat", std.mem.trim(u8, launcher_data, " \r\n"));
+}
+
+test "Scenario: Given only a PowerShell Windows codex wrapper when running login then codex.ps1 is launched" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
+
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+    try tmp.dir.makePath(".codex");
+    try tmp.dir.makePath("fake-bin");
+
+    const expected_email = "windows-ps1@example.com";
+    const fake_auth = try fixtures.authJsonWithEmailPlan(gpa, expected_email, "plus");
+    defer gpa.free(fake_auth);
+    try tmp.dir.writeFile(.{ .sub_path = "fake-auth.json", .data = fake_auth });
+    try writeBrokenBareWindowsCodex(tmp.dir);
+    try writeSuccessfulFakeCodexPowerShell(tmp.dir);
+
+    const fake_bin_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "fake-bin" });
+    defer gpa.free(fake_bin_path);
+    const path_override = try prependPathEntryAlloc(gpa, fake_bin_path);
+    defer gpa.free(path_override);
+
+    const result = try runCliWithIsolatedHomeAndPath(
+        gpa,
+        project_root,
+        home_root,
+        path_override,
+        &[_][]const u8{ "login", "--device-auth" },
+    );
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+
+    try expectSuccess(result);
+
+    const launcher_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "fake-codex-launcher.txt" });
+    defer gpa.free(launcher_path);
+    const launcher_data = try fixtures.readFileAlloc(gpa, launcher_path);
+    defer gpa.free(launcher_data);
+    try std.testing.expectEqualStrings("ps1", std.mem.trim(u8, launcher_data, " \r\n"));
+}
+
+test "Scenario: Given a winget-style Windows codex launcher when running login then codex.exe is launched" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
+
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+    try tmp.dir.makePath(".codex");
+    try tmp.dir.makePath("fake-bin");
+
+    const expected_email = "windows-exe@example.com";
+    const fake_auth = try fixtures.authJsonWithEmailPlan(gpa, expected_email, "plus");
+    defer gpa.free(fake_auth);
+    try tmp.dir.writeFile(.{ .sub_path = "fake-auth.json", .data = fake_auth });
+    try writeSuccessfulFakeCodexExe(gpa, tmp.dir, project_root);
+
+    const fake_bin_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "fake-bin" });
+    defer gpa.free(fake_bin_path);
+    const path_override = try prependPathEntryAlloc(gpa, fake_bin_path);
+    defer gpa.free(path_override);
+
+    const result = try runCliWithIsolatedHomeAndPath(
+        gpa,
+        project_root,
+        home_root,
+        path_override,
+        &[_][]const u8{ "login", "--device-auth" },
+    );
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+
+    try expectSuccess(result);
+
+    const launcher_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "fake-codex-launcher.txt" });
+    defer gpa.free(launcher_path);
+    const launcher_data = try fixtures.readFileAlloc(gpa, launcher_path);
+    defer gpa.free(launcher_data);
+    try std.testing.expectEqualStrings("exe", std.mem.trim(u8, launcher_data, " \r\n"));
+}
+
+test "Scenario: Given an earlier PowerShell launcher and a later exe launcher when running login then ps1 stays a global fallback" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
+
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+    try tmp.dir.makePath(".codex");
+    try tmp.dir.makePath("ps1-bin");
+    try tmp.dir.makePath("exe-bin");
+
+    const expected_email = "windows-ps1-first@example.com";
+    const fake_auth = try fixtures.authJsonWithEmailPlan(gpa, expected_email, "plus");
+    defer gpa.free(fake_auth);
+    try tmp.dir.writeFile(.{ .sub_path = "fake-auth.json", .data = fake_auth });
+    try tmp.dir.writeFile(.{ .sub_path = "ps1-bin/codex", .data = "#!/bin/sh\nexit 99\n" });
+
+    try writeSuccessfulFakeCodexPowerShellAt(tmp.dir, "ps1-bin/codex.ps1");
+    try writeSuccessfulFakeCodexExeAt(gpa, tmp.dir, project_root, "exe-bin/codex.exe");
+
+    const ps1_bin_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "ps1-bin" });
+    defer gpa.free(ps1_bin_path);
+    const exe_bin_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "exe-bin" });
+    defer gpa.free(exe_bin_path);
+    const exe_then_inherited_path = try prependPathEntryAlloc(gpa, exe_bin_path);
+    defer gpa.free(exe_then_inherited_path);
+    const path_override = try std.fmt.allocPrint(gpa, "{s}{c}{s}", .{
+        ps1_bin_path,
+        fs.path.delimiter,
+        exe_then_inherited_path,
+    });
+    defer gpa.free(path_override);
+
+    const result = try runCliWithIsolatedHomeAndPath(
+        gpa,
+        project_root,
+        home_root,
+        path_override,
+        &[_][]const u8{ "login", "--device-auth" },
+    );
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+
+    try expectSuccess(result);
+
+    const launcher_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "fake-codex-launcher.txt" });
+    defer gpa.free(launcher_path);
+    const launcher_data = try fixtures.readFileAlloc(gpa, launcher_path);
+    defer gpa.free(launcher_data);
+    try std.testing.expectEqualStrings("exe", std.mem.trim(u8, launcher_data, " \r\n"));
+}
+
 test "Scenario: Given refreshed active auth before login when running login then old account snapshot is synced first" {
     const gpa = std.testing.allocator;
     const project_root = try projectRootAlloc(gpa);
@@ -961,10 +1389,10 @@ test "Scenario: Given first-time use on v0.2 with an existing auth.json and no a
     const home_root = try tmp.dir.realpathAlloc(gpa, ".");
     defer gpa.free(home_root);
     try tmp.dir.makePath(".codex");
-    try writeFailingFakeNode(tmp.dir);
-    const fake_node_dir = try tmp.dir.realpathAlloc(gpa, "fake-node-bin");
-    defer gpa.free(fake_node_dir);
-    const path_override = try prependPathEntryAlloc(gpa, fake_node_dir);
+    try writeFailingFakeCurl(gpa, tmp.dir, project_root);
+    const fake_curl_dir = try tmp.dir.realpathAlloc(gpa, "fake-curl-bin");
+    defer gpa.free(fake_curl_dir);
+    const path_override = try prependPathEntryAlloc(gpa, fake_curl_dir);
     defer gpa.free(path_override);
 
     const email = "fresh@example.com";
@@ -1017,10 +1445,10 @@ test "Scenario: Given upgrade from v0.1.x to v0.2 with legacy accounts data when
     const home_root = try tmp.dir.realpathAlloc(gpa, ".");
     defer gpa.free(home_root);
     try tmp.dir.makePath(".codex/accounts");
-    try writeFailingFakeNode(tmp.dir);
-    const fake_node_dir = try tmp.dir.realpathAlloc(gpa, "fake-node-bin");
-    defer gpa.free(fake_node_dir);
-    const path_override = try prependPathEntryAlloc(gpa, fake_node_dir);
+    try writeFailingFakeCurl(gpa, tmp.dir, project_root);
+    const fake_curl_dir = try tmp.dir.realpathAlloc(gpa, "fake-curl-bin");
+    defer gpa.free(fake_curl_dir);
+    const path_override = try prependPathEntryAlloc(gpa, fake_curl_dir);
     defer gpa.free(path_override);
 
     const email = "legacy@example.com";
@@ -1134,11 +1562,11 @@ test "Scenario: Given API key import when listing with api refresh then stale sn
     const home_root = try tmp.dir.realpathAlloc(gpa, ".");
     defer gpa.free(home_root);
     try tmp.dir.makePath("imports");
-    try writeApiKeyFlowFakeNode(gpa, tmp.dir, project_root);
+    try writeApiKeyFlowFakeCurl(gpa, tmp.dir, project_root);
 
-    const fake_node_dir = try tmp.dir.realpathAlloc(gpa, "fake-node-bin");
-    defer gpa.free(fake_node_dir);
-    const path_override = try prependPathEntryAlloc(gpa, fake_node_dir);
+    const fake_curl_dir = try tmp.dir.realpathAlloc(gpa, "fake-curl-bin");
+    defer gpa.free(fake_curl_dir);
+    const path_override = try prependPathEntryAlloc(gpa, fake_curl_dir);
     defer gpa.free(path_override);
 
     const api_key = "sk-e2e-api-key-flow";
@@ -1149,12 +1577,11 @@ test "Scenario: Given API key import when listing with api refresh then stale sn
     const import_path = try fs.path.join(gpa, &[_][]const u8{ home_root, "imports", "api-key.json" });
     defer gpa.free(import_path);
 
-    const import_result = try runCliWithIsolatedHomeAndPathAndApiKeyNode(
+    const import_result = try runCliWithIsolatedHomeAndPathAndApiKeyCurl(
         gpa,
         project_root,
         home_root,
         path_override,
-        fake_node_dir,
         &[_][]const u8{ "import", import_path },
     );
     defer gpa.free(import_result.stdout);
@@ -1205,12 +1632,11 @@ test "Scenario: Given API key import when listing with api refresh then stale sn
     try fs.cwd().writeFile(.{ .sub_path = chatgpt_snapshot_path, .data = chatgpt_auth });
     try registry.saveRegistry(gpa, codex_home, &loaded);
 
-    const first_list = try runCliWithIsolatedHomeAndPathAndApiKeyNode(
+    const first_list = try runCliWithIsolatedHomeAndPathAndApiKeyCurl(
         gpa,
         project_root,
         home_root,
         path_override,
-        fake_node_dir,
         &[_][]const u8{ "list", "--api" },
     );
     defer gpa.free(first_list.stdout);
@@ -1235,12 +1661,11 @@ test "Scenario: Given API key import when listing with api refresh then stale sn
 
     try fs.cwd().writeFile(.{ .sub_path = api_snapshot_path, .data = "{}" });
 
-    const second_list = try runCliWithIsolatedHomeAndPathAndApiKeyNode(
+    const second_list = try runCliWithIsolatedHomeAndPathAndApiKeyCurl(
         gpa,
         project_root,
         home_root,
         path_override,
-        fake_node_dir,
         &[_][]const u8{ "list", "--api" },
     );
     defer gpa.free(second_list.stdout);
@@ -1653,21 +2078,20 @@ test "Scenario: Given cpa directory in default location when running import cpa 
         gpa,
         "Scanning ~/.cli-proxy-api...\n" ++
             "  imported  first.json\n" ++
+            "  imported  no-refresh.json\n" ++
             "  imported  second.json\n" ++
-            "Import Summary: 2 imported, 0 updated, 1 skipped (total 3 files)\n",
+            "Import Summary: 3 imported, 0 updated, 0 skipped (total 3 files)\n",
         .{},
     );
     defer gpa.free(expected_stdout);
     try std.testing.expectEqualStrings(expected_stdout, result.stdout);
-    const expected_stderr = try std.fmt.allocPrint(gpa, "  skipped   no-refresh.json: MissingRefreshToken\n", .{});
-    defer gpa.free(expected_stderr);
-    try std.testing.expectEqualStrings(expected_stderr, result.stderr);
+    try std.testing.expectEqualStrings("", result.stderr);
 
     const codex_home = try codexHomeAlloc(gpa, home_root);
     defer gpa.free(codex_home);
     var loaded = try registry.loadRegistry(gpa, codex_home);
     defer loaded.deinit(gpa);
-    try std.testing.expectEqual(@as(usize, 2), loaded.accounts.items.len);
+    try std.testing.expectEqual(@as(usize, 3), loaded.accounts.items.len);
 }
 
 test "Scenario: Given missing default cpa directory when running import cpa then it fails" {
@@ -1822,7 +2246,242 @@ test "Scenario: Given switch query with a direct local match when running switch
     var loaded = try registry.loadRegistry(gpa, codex_home);
     defer loaded.deinit(gpa);
     try std.testing.expect(loaded.active_account_key != null);
+    try std.testing.expect(loaded.previous_active_account_key != null);
     try std.testing.expect(std.mem.eql(u8, loaded.active_account_key.?, backup_key));
+    try std.testing.expect(std.mem.eql(u8, loaded.previous_active_account_key.?, active_key));
+}
+
+test "Scenario: Given previous account exists when running top-level dash then it switches back and forth" {
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+
+    try seedRegistryWithAccounts(gpa, home_root, "active@example.com", &[_]SeedAccount{
+        .{ .email = "active@example.com", .alias = "active" },
+        .{ .email = "backup@example.com", .alias = "backup" },
+    });
+
+    const codex_home = try codexHomeAlloc(gpa, home_root);
+    defer gpa.free(codex_home);
+    const active_auth_path = try authJsonPathAlloc(gpa, home_root);
+    defer gpa.free(active_auth_path);
+
+    const active_key = try fixtures.accountKeyForEmailAlloc(gpa, "active@example.com");
+    defer gpa.free(active_key);
+    const backup_key = try fixtures.accountKeyForEmailAlloc(gpa, "backup@example.com");
+    defer gpa.free(backup_key);
+    const active_snapshot_path = try registry.accountAuthPath(gpa, codex_home, active_key);
+    defer gpa.free(active_snapshot_path);
+    const backup_snapshot_path = try registry.accountAuthPath(gpa, codex_home, backup_key);
+    defer gpa.free(backup_snapshot_path);
+
+    const active_auth = try fixtures.authJsonWithEmailPlan(gpa, "active@example.com", "team");
+    defer gpa.free(active_auth);
+    const backup_auth = try fixtures.authJsonWithEmailPlan(gpa, "backup@example.com", "plus");
+    defer gpa.free(backup_auth);
+
+    try tmp.dir.writeFile(.{ .sub_path = ".codex/auth.json", .data = active_auth });
+    try fs.cwd().writeFile(.{ .sub_path = active_snapshot_path, .data = active_auth });
+    try fs.cwd().writeFile(.{ .sub_path = backup_snapshot_path, .data = backup_auth });
+
+    try tmp.dir.makePath("empty-bin");
+    const empty_path = try tmp.dir.realpathAlloc(gpa, "empty-bin");
+    defer gpa.free(empty_path);
+
+    const switch_result = try runCliWithIsolatedHomeAndPath(
+        gpa,
+        project_root,
+        home_root,
+        empty_path,
+        &[_][]const u8{ "switch", "backup@" },
+    );
+    defer gpa.free(switch_result.stdout);
+    defer gpa.free(switch_result.stderr);
+    try expectSuccess(switch_result);
+
+    const dash_result = try runCliWithIsolatedHomeAndPath(
+        gpa,
+        project_root,
+        home_root,
+        empty_path,
+        &[_][]const u8{"-"},
+    );
+    defer gpa.free(dash_result.stdout);
+    defer gpa.free(dash_result.stderr);
+    try expectSuccess(dash_result);
+    try std.testing.expectEqualStrings("Switched to active(active@example.com)\n", dash_result.stdout);
+    try std.testing.expectEqualStrings("", dash_result.stderr);
+
+    const auth_after_dash = try fixtures.readFileAlloc(gpa, active_auth_path);
+    defer gpa.free(auth_after_dash);
+    try std.testing.expectEqualStrings(active_auth, auth_after_dash);
+
+    var loaded_after_dash = try registry.loadRegistry(gpa, codex_home);
+    defer loaded_after_dash.deinit(gpa);
+    try std.testing.expect(loaded_after_dash.active_account_key != null);
+    try std.testing.expect(loaded_after_dash.previous_active_account_key != null);
+    try std.testing.expectEqualStrings(active_key, loaded_after_dash.active_account_key.?);
+    try std.testing.expectEqualStrings(backup_key, loaded_after_dash.previous_active_account_key.?);
+
+    const switch_dash_result = try runCliWithIsolatedHomeAndPath(
+        gpa,
+        project_root,
+        home_root,
+        empty_path,
+        &[_][]const u8{ "switch", "-" },
+    );
+    defer gpa.free(switch_dash_result.stdout);
+    defer gpa.free(switch_dash_result.stderr);
+    try expectSuccess(switch_dash_result);
+    try std.testing.expectEqualStrings("Switched to backup(backup@example.com)\n", switch_dash_result.stdout);
+    try std.testing.expectEqualStrings("", switch_dash_result.stderr);
+
+    const auth_after_switch_dash = try fixtures.readFileAlloc(gpa, active_auth_path);
+    defer gpa.free(auth_after_switch_dash);
+    try std.testing.expectEqualStrings(backup_auth, auth_after_switch_dash);
+}
+
+test "Scenario: Given no previous account when running dash then it fails cleanly" {
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+
+    try seedRegistryWithAccounts(gpa, home_root, "active@example.com", &[_]SeedAccount{
+        .{ .email = "active@example.com", .alias = "active" },
+    });
+
+    const result = try runCliWithIsolatedHome(
+        gpa,
+        project_root,
+        home_root,
+        &[_][]const u8{"-"},
+    );
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+
+    try expectFailure(result);
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings("error: no previous account to switch to.\n", result.stderr);
+}
+
+test "Scenario: Given previous is active after remove when running dash then it fails cleanly" {
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+
+    try seedRegistryWithAccounts(gpa, home_root, "active@example.com", &[_]SeedAccount{
+        .{ .email = "previous@example.com", .alias = "previous" },
+        .{ .email = "active@example.com", .alias = "active" },
+    });
+
+    const codex_home = try codexHomeAlloc(gpa, home_root);
+    defer gpa.free(codex_home);
+    const active_auth_path = try authJsonPathAlloc(gpa, home_root);
+    defer gpa.free(active_auth_path);
+
+    const previous_key = try fixtures.accountKeyForEmailAlloc(gpa, "previous@example.com");
+    defer gpa.free(previous_key);
+    const active_key = try fixtures.accountKeyForEmailAlloc(gpa, "active@example.com");
+    defer gpa.free(active_key);
+    const previous_snapshot_path = try registry.accountAuthPath(gpa, codex_home, previous_key);
+    defer gpa.free(previous_snapshot_path);
+    const active_snapshot_path = try registry.accountAuthPath(gpa, codex_home, active_key);
+    defer gpa.free(active_snapshot_path);
+
+    const previous_auth = try fixtures.authJsonWithEmailPlan(gpa, "previous@example.com", "plus");
+    defer gpa.free(previous_auth);
+    const active_auth = try fixtures.authJsonWithEmailPlan(gpa, "active@example.com", "pro");
+    defer gpa.free(active_auth);
+    try tmp.dir.writeFile(.{ .sub_path = ".codex/auth.json", .data = active_auth });
+    try fs.cwd().writeFile(.{ .sub_path = previous_snapshot_path, .data = previous_auth });
+    try fs.cwd().writeFile(.{ .sub_path = active_snapshot_path, .data = active_auth });
+
+    var seeded = try registry.loadRegistry(gpa, codex_home);
+    defer seeded.deinit(gpa);
+    try registry.setActiveAccountKey(gpa, &seeded, previous_key);
+    try registry.setActiveAccountKey(gpa, &seeded, active_key);
+    try registry.saveRegistry(gpa, codex_home, &seeded);
+
+    const remove_result = try runCliWithIsolatedHomeAndStdin(gpa, project_root, home_root, &[_][]const u8{ "remove", "active@" }, "");
+    defer gpa.free(remove_result.stdout);
+    defer gpa.free(remove_result.stderr);
+    try expectSuccess(remove_result);
+
+    const dash_result = try runCliWithIsolatedHome(gpa, project_root, home_root, &[_][]const u8{"-"});
+    defer gpa.free(dash_result.stdout);
+    defer gpa.free(dash_result.stderr);
+    try expectFailure(dash_result);
+    try std.testing.expectEqualStrings("", dash_result.stdout);
+    try std.testing.expectEqualStrings("error: no previous account to switch to.\n", dash_result.stderr);
+
+    const active_auth_after = try fixtures.readFileAlloc(gpa, active_auth_path);
+    defer gpa.free(active_auth_after);
+    try std.testing.expectEqualStrings(previous_auth, active_auth_after);
+
+    var loaded = try registry.loadRegistry(gpa, codex_home);
+    defer loaded.deinit(gpa);
+    try std.testing.expect(loaded.active_account_key != null);
+    try std.testing.expect(loaded.previous_active_account_key != null);
+    try std.testing.expectEqualStrings(previous_key, loaded.active_account_key.?);
+    try std.testing.expectEqualStrings(previous_key, loaded.previous_active_account_key.?);
+}
+
+test "Scenario: Given missing previous account when running switch dash then it fails cleanly" {
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+
+    try seedRegistryWithAccounts(gpa, home_root, "active@example.com", &[_]SeedAccount{
+        .{ .email = "active@example.com", .alias = "active" },
+    });
+
+    const codex_home = try codexHomeAlloc(gpa, home_root);
+    defer gpa.free(codex_home);
+    var reg = try registry.loadRegistry(gpa, codex_home);
+    defer reg.deinit(gpa);
+    reg.previous_active_account_key = try fixtures.accountKeyForEmailAlloc(gpa, "removed@example.com");
+    try registry.saveRegistry(gpa, codex_home, &reg);
+
+    const result = try runCliWithIsolatedHome(
+        gpa,
+        project_root,
+        home_root,
+        &[_][]const u8{ "switch", "-" },
+    );
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+
+    try expectFailure(result);
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings("error: previous account is no longer available.\n", result.stderr);
 }
 
 test "Scenario: Given alias set with a direct local match when running alias then registry alias is updated" {
@@ -2094,7 +2753,7 @@ test "Scenario: Given list default mode when running list then it requires api r
     defer gpa.free(result.stderr);
 
     try expectFailure(result);
-    try std.testing.expect(std.mem.indexOf(u8, result.stderr, "Node.js 22+") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stderr, "curl is required") != null);
 }
 
 test "Scenario: Given list with skip-api when running list then it does not require api refresh executables" {
@@ -2240,7 +2899,7 @@ test "Scenario: Given switch without api flags when running interactively then i
     defer gpa.free(result.stderr);
 
     try expectFailure(result);
-    try std.testing.expect(std.mem.indexOf(u8, result.stderr, "Node.js 22+") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stderr, "curl is required") != null);
 }
 
 test "Scenario: Given switch with skip-api when running interactively then it does not require api refresh executables" {
@@ -2577,7 +3236,7 @@ test "Scenario: Given interactive remove with api flag when running remove then 
 
     try expectFailure(result);
     try std.testing.expectEqualStrings("", result.stdout);
-    try std.testing.expect(std.mem.indexOf(u8, result.stderr, "Node.js 22+") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stderr, "curl is required") != null);
 }
 
 test "Scenario: Given remove without api flags when running remove then it requires api refresh executables by default" {
@@ -2614,7 +3273,7 @@ test "Scenario: Given remove without api flags when running remove then it requi
 
     try expectFailure(result);
     try std.testing.expectEqualStrings("", result.stdout);
-    try std.testing.expect(std.mem.indexOf(u8, result.stderr, "Node.js 22+") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stderr, "curl is required") != null);
 }
 
 test "Scenario: Given remove without selectors in default mode when running remove then it requires api refresh executables" {
@@ -2650,7 +3309,7 @@ test "Scenario: Given remove without selectors in default mode when running remo
 
     try expectFailure(result);
     try std.testing.expectEqualStrings("", result.stdout);
-    try std.testing.expect(std.mem.indexOf(u8, result.stderr, "Node.js 22+") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stderr, "curl is required") != null);
 }
 
 test "Scenario: Given remove with skip-api when running remove then it does not require api refresh executables" {
@@ -2742,6 +3401,81 @@ test "Scenario: Given active account removal with a replacement when running rem
     try std.testing.expectEqualStrings(backup_auth, replaced_auth);
     try std.testing.expectError(error.FileNotFound, fs.cwd().openFile(active_snapshot_path, .{}));
     try std.testing.expectEqual(@as(usize, 0), try countAuthBackups(tmp.dir, ".codex/accounts"));
+}
+
+test "Scenario: Given active account removal with a replacement when running remove then previous account is preserved" {
+    const gpa = std.testing.allocator;
+    const project_root = try projectRootAlloc(gpa);
+    defer gpa.free(project_root);
+    try buildCliBinary(gpa, project_root);
+
+    var tmp = fs.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const home_root = try tmp.dir.realpathAlloc(gpa, ".");
+    defer gpa.free(home_root);
+
+    try seedRegistryWithAccounts(gpa, home_root, "active@example.com", &[_]SeedAccount{
+        .{ .email = "previous@example.com", .alias = "previous" },
+        .{ .email = "active@example.com", .alias = "active" },
+        .{ .email = "backup@example.com", .alias = "backup" },
+    });
+
+    const codex_home = try codexHomeAlloc(gpa, home_root);
+    defer gpa.free(codex_home);
+    const active_auth_path = try authJsonPathAlloc(gpa, home_root);
+    defer gpa.free(active_auth_path);
+
+    const previous_key = try fixtures.accountKeyForEmailAlloc(gpa, "previous@example.com");
+    defer gpa.free(previous_key);
+    const active_key = try fixtures.accountKeyForEmailAlloc(gpa, "active@example.com");
+    defer gpa.free(active_key);
+    const backup_key = try fixtures.accountKeyForEmailAlloc(gpa, "backup@example.com");
+    defer gpa.free(backup_key);
+
+    const previous_snapshot_path = try registry.accountAuthPath(gpa, codex_home, previous_key);
+    defer gpa.free(previous_snapshot_path);
+    const active_snapshot_path = try registry.accountAuthPath(gpa, codex_home, active_key);
+    defer gpa.free(active_snapshot_path);
+    const backup_snapshot_path = try registry.accountAuthPath(gpa, codex_home, backup_key);
+    defer gpa.free(backup_snapshot_path);
+
+    const previous_auth = try fixtures.authJsonWithEmailPlan(gpa, "previous@example.com", "pro");
+    defer gpa.free(previous_auth);
+    const active_auth = try fixtures.authJsonWithEmailPlan(gpa, "active@example.com", "plus");
+    defer gpa.free(active_auth);
+    const backup_auth = try fixtures.authJsonWithEmailPlan(gpa, "backup@example.com", "team");
+    defer gpa.free(backup_auth);
+    try tmp.dir.writeFile(.{ .sub_path = ".codex/auth.json", .data = active_auth });
+    try fs.cwd().writeFile(.{ .sub_path = previous_snapshot_path, .data = previous_auth });
+    try fs.cwd().writeFile(.{ .sub_path = active_snapshot_path, .data = active_auth });
+    try fs.cwd().writeFile(.{ .sub_path = backup_snapshot_path, .data = backup_auth });
+
+    var seeded = try registry.loadRegistry(gpa, codex_home);
+    defer seeded.deinit(gpa);
+    try registry.setActiveAccountKey(gpa, &seeded, previous_key);
+    try registry.setActiveAccountKey(gpa, &seeded, active_key);
+    registry.updateUsage(gpa, &seeded, backup_key, makeUsageSnapshot(10.0, 10.0));
+    try registry.saveRegistry(gpa, codex_home, &seeded);
+
+    const result = try runCliWithIsolatedHomeAndStdin(gpa, project_root, home_root, &[_][]const u8{ "remove", "active@" }, "");
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+
+    try expectSuccess(result);
+    try std.testing.expectEqualStrings("Removed 1 account(s): active(active@example.com)\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+
+    const replaced_auth = try fixtures.readFileAlloc(gpa, active_auth_path);
+    defer gpa.free(replaced_auth);
+    try std.testing.expectEqualStrings(backup_auth, replaced_auth);
+
+    var loaded = try registry.loadRegistry(gpa, codex_home);
+    defer loaded.deinit(gpa);
+    try std.testing.expect(loaded.active_account_key != null);
+    try std.testing.expect(loaded.previous_active_account_key != null);
+    try std.testing.expectEqualStrings(backup_key, loaded.active_account_key.?);
+    try std.testing.expectEqualStrings(previous_key, loaded.previous_active_account_key.?);
 }
 
 test "Scenario: Given active account removal with missing auth json when running remove then replacement auth is recreated" {
@@ -2877,10 +3611,10 @@ test "Scenario: Given auth json already points at another registry account when 
         .{ .email = "alpha@example.com", .alias = "" },
         .{ .email = "beta@example.com", .alias = "" },
     });
-    try writeFailingFakeNode(tmp.dir);
-    const fake_node_dir = try tmp.dir.realpathAlloc(gpa, "fake-node-bin");
-    defer gpa.free(fake_node_dir);
-    const path_override = try prependPathEntryAlloc(gpa, fake_node_dir);
+    try writeFailingFakeCurl(gpa, tmp.dir, project_root);
+    const fake_curl_dir = try tmp.dir.realpathAlloc(gpa, "fake-curl-bin");
+    defer gpa.free(fake_curl_dir);
+    const path_override = try prependPathEntryAlloc(gpa, fake_curl_dir);
     defer gpa.free(path_override);
 
     const codex_home = try codexHomeAlloc(gpa, home_root);
